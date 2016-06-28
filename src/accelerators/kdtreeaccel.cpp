@@ -90,6 +90,7 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p,
                          int md)
     : isectCost(icost), traversalCost(tcost), maxPrims(maxp), maxDepth(md),
       emptyBonus(ebonus) {
+	printf("start KdTreeAccel\n");
     PBRT_KDTREE_STARTED_CONSTRUCTION(this, p.size());
     for (uint32_t i = 0; i < p.size(); ++i)
         p[i]->FullyRefine(primitives);
@@ -130,6 +131,7 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p,
     delete[] prims0;
     delete[] prims1;
     PBRT_KDTREE_FINISHED_CONSTRUCTION(this);
+	printf("end KdTreeAccel\n");
 }
 
 

@@ -581,12 +581,18 @@ Primitive *MakeAccelerator(const string &name,
         const vector<Reference<Primitive> > &prims,
         const ParamSet &paramSet) {
     Primitive *accel = NULL;
-    if (name == "bvh")
-        accel = CreateBVHAccelerator(prims, paramSet);
-    else if (name == "grid")
+	if (name == "bvh") {
+		accel = CreateBVHAccelerator(prims, paramSet);
+		printf("bvh accelerator created\n");
+	}
+    else if (name == "grid") {
         accel = CreateGridAccelerator(prims, paramSet);
-    else if (name == "kdtree")
+		printf("grid accelerator created\n");
+	}
+	else if (name == "kdtree") {
         accel = CreateKdTreeAccelerator(prims, paramSet);
+		printf("kdtree accelerator created\n");
+	}
     else
         Warning("Accelerator \"%s\" unknown.", name.c_str());
     paramSet.ReportUnused();
