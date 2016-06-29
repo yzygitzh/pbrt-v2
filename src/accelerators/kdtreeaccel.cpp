@@ -100,7 +100,6 @@ struct KdTreePrimitiveRefineTask : public Task {
 		uint32_t _startIdx, uint32_t _endIdx)
 		: p(_p), startIdx(_startIdx), endIdx(_endIdx), primitives(_primitives) {}
 	void Run(){
-		printf("hi\n");
 		for (uint32_t i = startIdx; i < endIdx; ++i)
 			p[i]->FullyRefine(primitives);
 	};
@@ -126,7 +125,7 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p,
 	vector<Task *> tasks;
 	tasks.resize(threadNum);
 	vector<Reference<Primitive> > *_thread_primitives = new vector<Reference<Primitive> >[threadNum];
-	for (int i = 0; i < threadNum - 1; ++i)
+	for (int i = 0; i < threadNum; ++i)
 		tasks[i] = new KdTreePrimitiveRefineTask(p, _thread_primitives[i], 
 			p.size() * i / threadNum, p.size() * (i + 1)/ threadNum);
 	EnqueueTasks(tasks);

@@ -1,4 +1,7 @@
 @ECHO OFF
+
+goto start
+
 setlocal EnableDelayedExpansion
 set "winbison="
 set "winflex="
@@ -22,6 +25,8 @@ for %%i in (%drives:~8%) do (
 		popd
 	)
 )
+
+:start 
 
 nmake BISON_PROGRAM="%winbison%" FLEX_PROGRAM="%winflex%" prebuild.makefile
 cd ..\3rdparty\ilmbase-1.0.2
