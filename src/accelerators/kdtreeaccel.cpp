@@ -139,9 +139,9 @@ struct KdTreeComputeBoundTask : public Task {
 // KdTreeAccel Method Definitions
 KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p,
                          int icost, int tcost, float ebonus, int maxp,
-                         int md)
+                         int md, int ws)
     : isectCost(icost), traversalCost(tcost), maxPrims(maxp), maxDepth(md),
-      emptyBonus(ebonus) {
+      emptyBonus(ebonus), workloadMaxSize(ws) {
 	printf("start KdTreeAccel\n");
 
 	PBRT_KDTREE_STARTED_CONSTRUCTION(this, p.size());
@@ -340,6 +340,13 @@ void KdTreeAccel::buildTree(int nodeNum, const BBox &nodeBounds,
     for (int i = bestOffset+1; i < 2*nPrimitives; ++i)
         if (edges[bestAxis][i].type == BoundEdge::END)
             prims1[n1++] = edges[bestAxis][i].primNum;
+
+	if (n0 + n1 > workloadMaxSize) {
+		if (n0 < workloadMaxSize)
+			printf("%d at depth %d\n", n0, maxDepth - depth);
+		if (n1 < workloadMaxSize)
+			printf("%d at depth %d\n", n1, maxDepth - depth);
+	}
 
     // Recursively initialize children nodes
     float tsplit = edges[bestAxis][bestOffset].t;

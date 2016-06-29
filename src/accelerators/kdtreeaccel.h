@@ -48,12 +48,13 @@ public:
     // KdTreeAccel Public Methods
     KdTreeAccel(const vector<Reference<Primitive> > &p,
                 int icost = 80, int scost = 1,  float ebonus = 0.5f, int maxp = 1,
-                int maxDepth = -1);
+                int maxDepth = -1, int workloadMaxSize = 1024);
     BBox WorldBound() const { return bounds; }
     bool CanIntersect() const { return true; }
     ~KdTreeAccel();
     bool Intersect(const Ray &ray, Intersection *isect) const;
     bool IntersectP(const Ray &ray) const;
+	KdAccelNode *GetNodes() const { return nodes; }
 private:
     // KdTreeAccel Private Methods
     void buildTree(int nodeNum, const BBox &bounds,
@@ -71,6 +72,7 @@ private:
 
 	// Parallel Constructing Related
 	int threadNum;
+	int workloadMaxSize;
 };
 
 
