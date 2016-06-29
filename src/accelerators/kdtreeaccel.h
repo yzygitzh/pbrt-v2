@@ -68,6 +68,9 @@ private:
     int nAllocedNodes, nextFreeNode;
     BBox bounds;
     MemoryArena arena;
+
+	// Parallel Constructing Related
+	int threadNum;
 };
 
 

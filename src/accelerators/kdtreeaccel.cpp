@@ -83,6 +83,33 @@ struct BoundEdge {
 };
 
 
+struct KdTreeBuildTask : public Task {
+	KdTreeBuildTask(ProgressReporter &pr, int id)
+		: progress(pr), taskId(id) {}
+	void Run(){
+		printf("Task %d reporting\n", taskId);
+	};
+	ProgressReporter &progress;
+	int taskId;
+};
+
+
+struct KdTreePrimitiveRefineTask : public Task {
+	KdTreePrimitiveRefineTask(const vector<Reference<Primitive> > &_p,
+		vector<Reference<Primitive> > &_primitives,
+		uint32_t _startIdx, uint32_t _endIdx)
+		: p(_p), startIdx(_startIdx), endIdx(_endIdx), primitives(_primitives) {}
+	void Run(){
+		printf("hi\n");
+		for (uint32_t i = startIdx; i < endIdx; ++i)
+			p[i]->FullyRefine(primitives);
+	};
+	const vector<Reference<Primitive> > &p;
+	vector<Reference<Primitive> > &primitives;
+	uint32_t startIdx;
+	uint32_t endIdx;
+};
+
 
 // KdTreeAccel Method Definitions
 KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p,
@@ -91,10 +118,27 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p,
     : isectCost(icost), traversalCost(tcost), maxPrims(maxp), maxDepth(md),
       emptyBonus(ebonus) {
 	printf("start KdTreeAccel\n");
-    PBRT_KDTREE_STARTED_CONSTRUCTION(this, p.size());
-    for (uint32_t i = 0; i < p.size(); ++i)
-        p[i]->FullyRefine(primitives);
-    // Build kd-tree for accelerator
+
+	PBRT_KDTREE_STARTED_CONSTRUCTION(this, p.size());
+
+	// Parallelly refine primitives
+	threadNum = NumSystemCores();
+	vector<Task *> tasks;
+	tasks.resize(threadNum);
+	vector<Reference<Primitive> > *_thread_primitives = new vector<Reference<Primitive> >[threadNum];
+	for (int i = 0; i < threadNum - 1; ++i)
+		tasks[i] = new KdTreePrimitiveRefineTask(p, _thread_primitives[i], 
+			p.size() * i / threadNum, p.size() * (i + 1)/ threadNum);
+	EnqueueTasks(tasks);
+	WaitForAllTasks();
+	for (uint32_t i = 0; i < threadNum; ++i)
+		delete tasks[i];
+	// Merge primitives
+	for (uint32_t i = 0; i < threadNum; ++i)
+		primitives.insert(primitives.end(), _thread_primitives[i].begin(), _thread_primitives[i].end());
+	delete[] _thread_primitives;
+
+	// Build kd-tree for accelerator
     nextFreeNode = nAllocedNodes = 0;
     if (maxDepth <= 0)
         maxDepth = Round2Int(8 + 1.3f * Log2Int(float(primitives.size())));
