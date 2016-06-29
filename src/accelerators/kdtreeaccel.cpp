@@ -110,6 +110,32 @@ struct KdTreePrimitiveRefineTask : public Task {
 };
 
 
+struct KdTreeComputeBoundTask : public Task {
+	KdTreeComputeBoundTask(const vector<Reference<Primitive> > &_primitives,
+		vector<BBox > &_primBounds, BBox &_bounds, uint32_t *_primNums, 
+		uint32_t _startIdx, uint32_t _endIdx)
+		: primitives(_primitives), 
+		startIdx(_startIdx), endIdx(_endIdx), 
+		primBounds(_primBounds), bounds(_bounds), primNums(_primNums){}
+	void Run(){
+		primBounds.reserve(endIdx - startIdx);
+		for (uint32_t i = startIdx; i < endIdx; ++i)
+		{
+			BBox b = primitives[i]->WorldBound();
+			bounds = Union(bounds, b);
+			primBounds.push_back(b);
+			primNums[i] = i;
+		}
+	};
+	const vector<Reference<Primitive> > &primitives;
+	vector<BBox > &primBounds;
+	BBox &bounds;
+	uint32_t startIdx;
+	uint32_t endIdx;
+	uint32_t *primNums;
+};
+
+
 // KdTreeAccel Method Definitions
 KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p,
                          int icost, int tcost, float ebonus, int maxp,
@@ -120,21 +146,23 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p,
 
 	PBRT_KDTREE_STARTED_CONSTRUCTION(this, p.size());
 
-	// Parallelly refine primitives
+	// Thread context initialization
 	threadNum = NumSystemCores();
 	vector<Task *> tasks;
 	tasks.resize(threadNum);
+	
+	// Parallelly refine primitives
 	vector<Reference<Primitive> > *_thread_primitives = new vector<Reference<Primitive> >[threadNum];
 	for (int i = 0; i < threadNum; ++i)
 		tasks[i] = new KdTreePrimitiveRefineTask(p, _thread_primitives[i], 
 			p.size() * i / threadNum, p.size() * (i + 1)/ threadNum);
 	EnqueueTasks(tasks);
 	WaitForAllTasks();
-	for (uint32_t i = 0; i < threadNum; ++i)
+	for (uint32_t i = 0; i < threadNum; ++i) {
 		delete tasks[i];
-	// Merge primitives
-	for (uint32_t i = 0; i < threadNum; ++i)
 		primitives.insert(primitives.end(), _thread_primitives[i].begin(), _thread_primitives[i].end());
+		_thread_primitives[i].~vector();
+	}
 	delete[] _thread_primitives;
 
 	// Build kd-tree for accelerator
@@ -142,14 +170,28 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p,
     if (maxDepth <= 0)
         maxDepth = Round2Int(8 + 1.3f * Log2Int(float(primitives.size())));
 
-    // Compute bounds for kd-tree construction
-    vector<BBox> primBounds;
-    primBounds.reserve(primitives.size());
-    for (uint32_t i = 0; i < primitives.size(); ++i) {
-        BBox b = primitives[i]->WorldBound();
-        bounds = Union(bounds, b);
-        primBounds.push_back(b);
-    }
+    // Parallelly compute bounds for kd-tree construction
+	// and initialize _primNums_ for kd-tree construction
+	uint32_t *primNums = new uint32_t[primitives.size()];
+	vector<BBox> primBounds;
+	primBounds.reserve(primitives.size());
+	vector<BBox> *_thread_primBounds = new vector<BBox>[threadNum];
+	BBox *_thread_bounds = new BBox[threadNum];
+	for (int i = 0; i < threadNum; ++i)
+		tasks[i] = new KdTreeComputeBoundTask(primitives, _thread_primBounds[i], _thread_bounds[i], primNums,
+			primitives.size() * i / threadNum, primitives.size() * (i + 1) / threadNum);
+	EnqueueTasks(tasks);
+	WaitForAllTasks();
+	// Merge bounds
+	for (uint32_t i = 0; i < threadNum; ++i)
+	{
+		delete tasks[i];
+		primBounds.insert(primBounds.end(), _thread_primBounds[i].begin(), _thread_primBounds[i].end());
+		bounds = Union(bounds, _thread_bounds[i]);
+		_thread_primBounds[i].~vector();
+	}
+	delete[] _thread_primBounds;
+	delete[] _thread_bounds;
 
     // Allocate working memory for kd-tree construction
     BoundEdge *edges[3];
@@ -157,11 +199,6 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p,
         edges[i] = new BoundEdge[2*primitives.size()];
     uint32_t *prims0 = new uint32_t[primitives.size()];
     uint32_t *prims1 = new uint32_t[(maxDepth+1) * primitives.size()];
-
-    // Initialize _primNums_ for kd-tree construction
-    uint32_t *primNums = new uint32_t[primitives.size()];
-    for (uint32_t i = 0; i < primitives.size(); ++i)
-        primNums[i] = i;
 
     // Start recursive construction of kd-tree
     buildTree(0, bounds, primBounds, primNums, primitives.size(),
