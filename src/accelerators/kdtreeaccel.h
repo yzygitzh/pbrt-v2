@@ -48,7 +48,7 @@ public:
     // KdTreeAccel Public Methods
 	KdTreeAccel(const vector<Reference<Primitive> > &p, bool parallelEntry, 
                 int icost = 80, int scost = 1,  float ebonus = 0.5f, int maxp = 1,
-                int maxDepth = -1, int workloadMaxSize = 1024);
+                int maxDepth = -1, int workloadMaxSize = 1024, BBox initBounds = BBox(), int initBadRefines = 0);
     BBox WorldBound() const { return bounds; }
     bool CanIntersect() const { return true; }
     ~KdTreeAccel();
@@ -78,6 +78,8 @@ private:
 	int threadNum;
 	int workloadMaxSize;
 	bool parallelEntry;
+	int badRefines;
+	BBox taskBounds;
 };
 
 
@@ -90,6 +92,6 @@ struct KdToDo {
 KdTreeAccel *CreateKdTreeAccelerator(const vector<Reference<Primitive> > &prims,
         const ParamSet &ps);
 
-KdTreeAccel *CreateSubKdTreeAccelerator(const vector<Reference<Primitive> > &prims, int maxDepth);
+KdTreeAccel *CreateSubKdTreeAccelerator(const vector<Reference<Primitive> > &prims, int maxDepth, BBox initBounds, int initBadRefines);
 
 #endif // PBRT_ACCELERATORS_KDTREEACCEL_H

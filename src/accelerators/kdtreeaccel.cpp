@@ -35,6 +35,10 @@
 #include "accelerators/kdtreeaccel.h"
 #include "paramset.h"
 
+const bool PARALLEL_CONSTRUCT = true;
+const int PRRALLEL_WORKSIZE = 1024;
+bool tmp_switch = false;
+
 // KdTreeAccel Local Declarations
 struct KdAccelNode {
     // KdAccelNode Methods
@@ -49,10 +53,11 @@ struct KdAccelNode {
     uint32_t SplitAxis() const { return flags & 3; }
     bool IsLeaf() const { return (flags & 3) == 3; }
     uint32_t AboveChild() const { return aboveChild >> 2; }
-	void PromoteNode(int n, vector<int> &originPrimId) { 
-		if (!IsLeaf())
-			aboveChild += (n << 2);
-		else {
+	void PromoteNode(int n, vector<int> &originPrimId, bool isParallelChild) { 
+		if (!IsLeaf()) {
+			aboveChild += (n << 2); 
+		}
+		else if (isParallelChild) {
 			if ((nPrims >> 2) == 1)
 				onePrimitive = originPrimId[onePrimitive];
 			else
@@ -64,9 +69,11 @@ struct KdAccelNode {
         float split;            // Interior
         uint32_t onePrimitive;  // Leaf
         uint32_t *primitives;   // Leaf
-    };
+	};
+	int debug_nPrimitives;
 
 private:
+public:
     union {
         uint32_t flags;         // Both
         uint32_t nPrims;        // Leaf
@@ -142,11 +149,13 @@ public:
 	vector<int> &originPrimId;
 	KdTreeAccel *subKdTree;
 	int depth, originNodeIdx;
+	int badRefines;
+	BBox taskBounds;
 	KdTreeBuildSubTreeTask(vector<Reference<Primitive> > &_prims, 
 		vector<int> &_originPrimId,
-		int _depth, int _originNodeIdx)
+		int _depth, int _originNodeIdx, int _badRefines, BBox _taskBounds)
 	:prims(_prims), originPrimId(_originPrimId), 
-	depth(_depth), originNodeIdx(_originNodeIdx){}
+	depth(_depth), originNodeIdx(_originNodeIdx), badRefines(_badRefines), taskBounds(_taskBounds){}
 
 	~KdTreeBuildSubTreeTask() {
 		prims.~vector();
@@ -158,17 +167,43 @@ public:
 	}
 
 	void Run(){
-		subKdTree = CreateSubKdTreeAccelerator(prims, depth);
+		subKdTree = CreateSubKdTreeAccelerator(prims, depth, taskBounds, badRefines);
 	}
 };
 
 
 KdTreeAccel *testptr;
+struct countNodesLeftSubSummerRet{
+	int nodeSum;
+	int valSum;
+	countNodesLeftSubSummerRet(int n, int v) :nodeSum(n), valSum(v){}
+};
+countNodesLeftSubSummerRet countNodesLeftSubSummer(vector<int> &nodesIndicator, vector<int> &nodesLeftSubSummer, vector<Task *> &tasks, int idx){
+	int nodeClass = nodesIndicator[idx];
+	if (nodeClass == 0) {
+		// isLeaf
+		nodesLeftSubSummer[idx] = 0;
+		return countNodesLeftSubSummerRet(1, 1);
+	}
+	else if (nodeClass == 1) {
+		// isIntr
+		countNodesLeftSubSummerRet lRet = countNodesLeftSubSummer(nodesIndicator, nodesLeftSubSummer, tasks, idx + 1);
+		countNodesLeftSubSummerRet rRet = countNodesLeftSubSummer(nodesIndicator, nodesLeftSubSummer, tasks, idx + lRet.nodeSum + 1);
+		nodesLeftSubSummer[idx] = lRet.valSum;
+		return countNodesLeftSubSummerRet(lRet.nodeSum + rRet.nodeSum + 1, lRet.valSum + rRet.valSum + 1);
+	}
+	else {
+		// isTask
+		nodesLeftSubSummer[idx] = 0;
+		int retVal = (dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[nodeClass >> 2]))->subKdTree->GetNodeNum();
+		return countNodesLeftSubSummerRet(1, retVal);
+	}
+}
 
 // KdTreeAccel Method Definitions
 KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry, 
                          int icost, int tcost, float ebonus, int maxp,
-                         int md, int ws)
+                         int md, int ws, BBox initBounds, int initBadRefines)
     : isectCost(icost), parallelEntry(pEntry), traversalCost(tcost), maxPrims(maxp), maxDepth(md),
       emptyBonus(ebonus), workloadMaxSize(ws) {
 	PBRT_KDTREE_STARTED_CONSTRUCTION(this, p.size());
@@ -197,13 +232,15 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 	}
 	// They've been refined
 	else
-		primitives.insert(primitives.end(), p.begin(), p.end());
-		//for (uint32_t i = 0; i < p.size(); ++i)
-		//	p[i]->FullyRefine(primitives);
-
+		if (PARALLEL_CONSTRUCT)
+			primitives = p;
+		else
+			for (uint32_t i = 0; i < p.size(); ++i)
+				p[i]->FullyRefine(primitives);
+		
 	// Build kd-tree for accelerator
 	nextFreeNode = nAllocedNodes = 0;
-	if (maxDepth < 0)
+	if (maxDepth <= 0)
 		maxDepth = Round2Int(8 + 1.3f * Log2Int(float(primitives.size())));
 
 	// Parallelly compute bounds for kd-tree construction
@@ -212,12 +249,13 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 	vector<BBox> primBounds;
 	primBounds.reserve(primitives.size());
 	
-	if (parallelEntry){
+	if (parallelEntry)
+	{
 		vector<BBox> *_thread_primBounds = new vector<BBox>[threadNum];
 		BBox *_thread_bounds = new BBox[threadNum];
 		for (int i = 0; i < threadNum; ++i)
 			tasks[i] = new KdTreeComputeBoundTask(primitives, _thread_primBounds[i], _thread_bounds[i], primNums,
-				primitives.size() * i / threadNum, primitives.size() * (i + 1) / threadNum);
+			primitives.size() * i / threadNum, primitives.size() * (i + 1) / threadNum);
 		EnqueueTasks(tasks);
 		WaitForAllTasks();
 		// Merge bounds
@@ -231,14 +269,29 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 		delete[] _thread_primBounds;
 		delete[] _thread_bounds;
 	}
-	else
-		for (uint32_t i = 0; i < primitives.size(); ++i)
-		{
-			BBox b = primitives[i]->WorldBound();
-			bounds = Union(bounds, b);
-			primBounds.push_back(b);
-			primNums[i] = i;
+	else {
+		if (PARALLEL_CONSTRUCT){
+			for (uint32_t i = 0; i < primitives.size(); ++i)
+			{
+				BBox b = primitives[i]->WorldBound();
+				bounds = Union(bounds, b);
+				primBounds.push_back(b);
+				primNums[i] = i;
+			}
+			if (!parallelEntry) {
+				bounds = initBounds;
+				badRefines = initBadRefines;
+			}
 		}
+		else
+			for (uint32_t i = 0; i < primitives.size(); ++i)
+			{
+				BBox b = primitives[i]->WorldBound();
+				bounds = Union(bounds, b);
+				primBounds.push_back(b);
+				primNums[i] = i;
+			}
+	}
 
     // Allocate working memory for kd-tree construction
     BoundEdge *edges[3];
@@ -249,18 +302,34 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 
     // Start recursive construction of kd-tree
 	// modified to generate buildSubTree tasks
-	if (parallelEntry)
+	if (parallelEntry) {
 		tasks.clear();
-
-	buildTree(0, bounds, primBounds, primNums, primitives.size(),
-		maxDepth, edges, prims0, prims1, tasks);
+		buildTree(0, bounds, primBounds, primNums, primitives.size(),
+			maxDepth, edges, prims0, prims1, tasks);
+	}
+	else
+		if (PARALLEL_CONSTRUCT)
+			buildTree(0, bounds, primBounds, primNums, primitives.size(),
+				maxDepth, edges, prims0, prims1, tasks, badRefines);
+		else
+			buildTree(0, bounds, primBounds, primNums, primitives.size(),
+			maxDepth, edges, prims0, prims1, tasks);
 
 	if (parallelEntry) {
 		EnqueueTasks(tasks);
 		WaitForAllTasks();
 		
 		int taskIOffset[2] = { -1, -1 };
-		int nodesOffset = 0, newNodesOffset = 0;
+
+		// like nextFreeNode; the copy pointer
+		// newNodesOffset are also used to promote the tasks nodes
+		int nodesOffset = 0, newNodesOffset = 0; 
+		
+		// used to promote nodes from nodes
+		int nodesPromote = 0;
+
+		int nodesInterval;
+
 		int newNAllocedNodes = 0;
 		KdAccelNode *newNodes;
 		
@@ -272,54 +341,68 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 
 		newNodes = AllocAligned<KdAccelNode>(newNAllocedNodes);
 
-		for (uint32_t i = 0; i < tasks.size(); ++i) {
-			// add and promote nodes interval
-			taskIOffset[1] = (dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->originNodeIdx;
-			int nodesInterval = taskIOffset[1] - taskIOffset[0] - 1;
-			memcpy(newNodes + newNodesOffset, nodes + nodesOffset, nodesInterval * sizeof(KdAccelNode));
-			newNodesOffset += nodesInterval;
-			nodesOffset += nodesInterval;
-			taskIOffset[0] = taskIOffset[1];
+		vector<int> nodesIndicator, nodesLeftSubSummer;
+		nodesIndicator.resize(nextFreeNode);
+		nodesLeftSubSummer.resize(nextFreeNode);
+		for (uint32_t i = 0; i < nextFreeNode; ++i)
+			if (nodes[i].IsLeaf())
+				nodesIndicator[i] = 0;
+			else
+				nodesIndicator[i] = 1;
+		for (uint32_t i = 0; i < tasks.size(); ++i)
+			nodesIndicator[(dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->originNodeIdx] = 2 + (i << 2);
 
-			//printf("newNodesOffset: %d\n", newNodesOffset);
-			//printf("primitiveOffset: %d\n", primitivesOffset);
-			
-			for (uint32_t j = newNodesOffset - nodesInterval; j < newNodesOffset; ++j) {
-				//Assert((newNodes[j].IsLeaf() && newNodes[j].nPrimitives() < 100000) || 
-				//	(!newNodes[j].IsLeaf() && newNodes[j].AboveChild() < 100000));
-				newNodes[j].PromoteNode(newNodesOffset - nodesOffset, 
-					(dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->originPrimId);
-			}
+		countNodesLeftSubSummer(nodesIndicator, nodesLeftSubSummer, tasks, 0);
+		for (uint32_t i = 0; i < nextFreeNode; ++i)
+			nodes[i].aboveChild = ((i + 1 + nodesLeftSubSummer[i]) << 2);
+
+		for (uint32_t i = 0; i < tasks.size(); ++i) {
+			// add, do LEFT BROTHER promote later
+			// nodes interval
+			taskIOffset[1] = (dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->originNodeIdx;
+			nodesInterval = taskIOffset[1] - taskIOffset[0] - 1;			
+			memcpy(newNodes + newNodesOffset, nodes + nodesOffset, nodesInterval * sizeof(KdAccelNode));
+			taskIOffset[0] = taskIOffset[1];		
+
 			// add and promote task interval
 			int taskInterval = (dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->subKdTree->GetNodeNum();
-			if (taskInterval != 1)
-				int k = 0;
+			
+			// do nodes interval promotion
+			for (uint32_t j = newNodesOffset; j < newNodesOffset + nodesInterval; ++j){
+				newNodes[j].PromoteNode(nodesPromote,
+					(dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->originPrimId, false);
+			}
+
+			newNodesOffset += nodesInterval;
+			nodesOffset += nodesInterval;
 			
 			memcpy(newNodes + newNodesOffset, 
 				(dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->subKdTree->GetNodes(), 
-				taskInterval * sizeof(KdAccelNode));
+				taskInterval * sizeof(KdAccelNode));			
+			for (uint32_t j = newNodesOffset; j < newNodesOffset + taskInterval; ++j) {
+				newNodes[j].PromoteNode(newNodesOffset, 
+					(dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->originPrimId, true);
+			}
+
+			nodesPromote += taskInterval - 1;
 			newNodesOffset += taskInterval;
 			nodesOffset += 1;
-
-			printf("primitiveNum: %d\n", (dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->subKdTree->primitives.size());
-
-			for (uint32_t j = newNodesOffset - taskInterval; j < newNodesOffset; ++j) {
-				//Assert((newNodes[j].IsLeaf() && newNodes[j].nPrimitives() < 100000) ||
-				//	(!newNodes[j].IsLeaf() && newNodes[j].AboveChild() < 100000));
-				newNodes[j].PromoteNode(newNodesOffset, 
-					(dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->originPrimId);
-			}
-			
-			//delete tasks[i];
-			//if (i == 5)
-			//	testptr = (dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->subKdTree;
 		}
-		//newNodes = (dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[100]))->subKdTree->nodes;
-		//primitives = (dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[100]))->subKdTree->primitives;
+		// final segment
+		nodesInterval = nextFreeNode - nodesOffset;
+		memcpy(newNodes + newNodesOffset, nodes + nodesOffset, nodesInterval * sizeof(KdAccelNode));
+		for (uint32_t j = newNodesOffset; j < newNodesOffset + nodesInterval; ++j) {
+			newNodes[j].PromoteNode(nodesPromote,
+				(dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[0]))->originPrimId, false);
+		}
 
+		newNodesOffset += nodesInterval;
+		nodesOffset += nodesInterval;
+		
 		// replace with new nodes
 		FreeAligned(nodes);
 		nodes = newNodes;
+		nextFreeNode = newNodesOffset;
 	}
 
     // Free working memory for kd-tree construction
@@ -373,7 +456,7 @@ void KdTreeAccel::buildTree(int nodeNum, const BBox &nodeBounds,
 		nAllocedNodes = nAlloc;
 	}
 	++nextFreeNode;
-
+	
 	// Initialize leaf node if termination criteria met
 	if (nPrimitives <= maxPrims || depth == 0)
 	{
@@ -449,7 +532,8 @@ retrySplit:
 		axis = (axis + 1) % 3;
 		goto retrySplit;
 	}
-	if (bestCost > oldCost) ++badRefines;
+	if (bestCost > oldCost) 
+		++badRefines;
 	if ((bestCost > 4.f * oldCost && nPrimitives < 16) ||
 		bestAxis == -1 || badRefines == 3)
 	{
@@ -472,7 +556,7 @@ retrySplit:
 	PBRT_KDTREE_CREATED_INTERIOR_NODE(bestAxis, tsplit);
 	BBox bounds0 = nodeBounds, bounds1 = nodeBounds;
 	bounds0.pMax[bestAxis] = bounds1.pMin[bestAxis] = tsplit;
-	
+
 	//if (parallelEntry) {
 	if ((n0 < workloadMaxSize) && (n0 > maxPrims) && parallelEntry) {
 		vector<Reference<Primitive> > *prims = new vector<Reference<Primitive> >;
@@ -481,9 +565,9 @@ retrySplit:
 			prims->push_back(primitives[prims0[i]]);
 			originId->push_back(prims0[i]);
 		}
-		printf("Create task with n = %d\n", n0);
-		tasks.push_back(new KdTreeBuildSubTreeTask(*prims, *originId, 0, nodeNum + 1));
-		++nextFreeNode;
+		
+		tasks.push_back(new KdTreeBuildSubTreeTask(*prims, *originId, depth - 1, nodeNum + 1, badRefines, bounds0));
+		//tasks.push_back(new KdTreeBuildSubTreeTask(*prims, *originId, 0, nodeNum + 1));
 		// Get next free node from _nodes_ array
 		if (nextFreeNode == nAllocedNodes)
 		{
@@ -497,6 +581,7 @@ retrySplit:
 			nodes = n;
 			nAllocedNodes = nAlloc;
 		}
+		++nextFreeNode;
 	}
 	else
 		buildTree(nodeNum + 1, bounds0,
@@ -504,7 +589,9 @@ retrySplit:
 			prims0, prims1 + nPrimitives, tasks, badRefines);
 	
 	uint32_t aboveChild = nextFreeNode;	
+	
 	nodes[nodeNum].initInterior(bestAxis, aboveChild, tsplit);
+	nodes[nodeNum].debug_nPrimitives = nPrimitives;
 
 	//if (parallelEntry) {
 	if ((n1 < workloadMaxSize) && (n1 > maxPrims) && parallelEntry) {
@@ -514,9 +601,9 @@ retrySplit:
 			prims->push_back(primitives[prims1[i]]);
 			originId->push_back(prims1[i]);
 		}
-		printf("Create task with n = %d\n", n1);
-		tasks.push_back(new KdTreeBuildSubTreeTask(*prims, *originId, 0, aboveChild));
-		++nextFreeNode;
+		
+		tasks.push_back(new KdTreeBuildSubTreeTask(*prims, *originId, depth - 1, aboveChild, badRefines, bounds1));
+		//tasks.push_back(new KdTreeBuildSubTreeTask(*prims, *originId, 0, aboveChild));
 		// Get next free node from _nodes_ array
 		if (nextFreeNode == nAllocedNodes)
 		{
@@ -530,6 +617,7 @@ retrySplit:
 			nodes = n;
 			nAllocedNodes = nAlloc;
 		}
+		++nextFreeNode;
 	}
 	else
 		buildTree(aboveChild, bounds1, allPrimBounds, prims1, n1,
@@ -557,7 +645,10 @@ bool KdTreeAccel::Intersect(const Ray &ray,
     // Traverse kd-tree nodes in order for ray
     bool hit = false;
     const KdAccelNode *node = &nodes[0];
+
+	int whileCount = 0;
     while (node != NULL) {
+		whileCount++;
         // Bail out if we found a hit closer than the current node
         if (ray.maxt < tmin) break;
         if (!node->IsLeaf()) {
@@ -635,6 +726,7 @@ bool KdTreeAccel::Intersect(const Ray &ray,
                 break;
         }
     }
+	//printf("whileCount in Intersect: %d\n", whileCount);
     PBRT_KDTREE_INTERSECTION_FINISHED();
     return hit;
 }
@@ -740,21 +832,35 @@ KdTreeAccel *CreateKdTreeAccelerator(const vector<Reference<Primitive> > &prims,
     float emptyBonus = ps.FindOneFloat("emptybonus", 0.5f);
     int maxPrims = ps.FindOneInt("maxprims", 1);
     int maxDepth = ps.FindOneInt("maxdepth", -1);
-    return new KdTreeAccel(prims, true, isectCost, travCost,
-        emptyBonus, maxPrims, maxDepth);
-	//KdTreeAccel(prims, true, isectCost, travCost,
-	//	emptyBonus, maxPrims, maxDepth);
-	//return testptr;
+	if (PARALLEL_CONSTRUCT)
+		testptr = new KdTreeAccel(prims, true, isectCost, travCost,
+			emptyBonus, maxPrims, maxDepth, PRRALLEL_WORKSIZE);
+	else
+		testptr = new KdTreeAccel(prims, false, isectCost, travCost,
+			emptyBonus, maxPrims, maxDepth);
+	int nodeNum = testptr->GetNodeNum();
+	KdAccelNode *nodes = testptr->GetNodes();
+	for (int i = 0; i < nodeNum; i++) { 
+		if (nodes[i].IsLeaf()) {
+			printf("LEAF: nPrim=%d\n", nodes[i].nPrimitives());
+		}
+		else {
+			printf("INTR: nPrim=%d, aboveChild=%d, splitAxis=%d, splitPos=%f\n", 
+				nodes[i].debug_nPrimitives, nodes[i].AboveChild(), nodes[i].SplitAxis(), nodes[i].SplitPos());
+		}
+		//printf("%08x\n%08x\n", ((uint32_t *)(nodes + i))[0], ((uint32_t *)(nodes + i))[1]);
+	}
+	return testptr;
 }
 
 
-KdTreeAccel *CreateSubKdTreeAccelerator(const vector<Reference<Primitive> > &prims, int maxDepth) {
+KdTreeAccel *CreateSubKdTreeAccelerator(const vector<Reference<Primitive> > &prims, int maxDepth, BBox initBounds, int initBadRefines) {
 	int isectCost = 80;
 	int travCost = 1;
 	float emptyBonus = 0.5f;
 	int maxPrims = 1;
 	return new KdTreeAccel(prims, false, isectCost, travCost,
-		emptyBonus, maxPrims, maxDepth);
+		emptyBonus, maxPrims, maxDepth, PRRALLEL_WORKSIZE, initBounds, initBadRefines);
 }
 
 
