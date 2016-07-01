@@ -34,8 +34,9 @@
 #include "stdafx.h"
 #include "accelerators/kdtreeaccel.h"
 #include "paramset.h"
+#include <time.h>
 
-const bool PARALLEL_CONSTRUCT = true;
+const bool PARALLEL_CONSTRUCT = false;
 const int PRRALLEL_WORKSIZE = 1024;
 bool tmp_switch = false;
 
@@ -172,7 +173,6 @@ public:
 };
 
 
-KdTreeAccel *testptr;
 struct countNodesLeftSubSummerRet{
 	int nodeSum;
 	int valSum;
@@ -373,22 +373,9 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 			int taskInterval = (dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->subKdTree->GetNodeNum();
 			
 			// do nodes interval promotion
-			for (uint32_t j = newNodesOffset; j < newNodesOffset + nodesInterval; ++j){
-				if (j == 10814) {
-					int sum = 0;
-					sum += (dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[1]))->subKdTree->GetNodeNum();
-					sum += (dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[2]))->subKdTree->GetNodeNum();
-					sum += 3;
-					int sumleft = 0;
-					sumleft += (dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[0]))->subKdTree->GetNodeNum();
-					sumleft += 1;
-					int k = 0;
-				}
+			for (uint32_t j = newNodesOffset; j < newNodesOffset + nodesInterval; ++j)
 				newNodes[j].PromoteNode(nodesPromote,
 					(dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->originPrimId, false);
-				if (newNodes[j].AboveChild() == 23552)
-					int k = 0;
-			}
 
 			newNodesOffset += nodesInterval;
 			nodesOffset += nodesInterval;
@@ -396,12 +383,9 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 			memcpy(newNodes + newNodesOffset, 
 				(dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->subKdTree->GetNodes(), 
 				taskInterval * sizeof(KdAccelNode));			
-			for (uint32_t j = newNodesOffset; j < newNodesOffset + taskInterval; ++j) {
+			for (uint32_t j = newNodesOffset; j < newNodesOffset + taskInterval; ++j)
 				newNodes[j].PromoteNode(newNodesOffset, 
 					(dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->originPrimId, true);
-				if (newNodes[j].AboveChild() == 23552)
-					int k = 0;
-			}
 
 			nodesPromote += taskInterval - 1;
 			newNodesOffset += taskInterval;
@@ -413,8 +397,6 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 		for (uint32_t j = newNodesOffset; j < newNodesOffset + nodesInterval; ++j) {
 			newNodes[j].PromoteNode(nodesPromote,
 				(dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[0]))->originPrimId, false);
-			if (newNodes[j].AboveChild() == 23552)
-				int k = 0;
 		}
 
 		newNodesOffset += nodesInterval;
@@ -451,8 +433,6 @@ void KdAccelNode::initLeaf(uint32_t *primNums, int np,
         for (int i = 0; i < np; ++i)
             primitives[i] = primNums[i];
     }
-	if (this->nPrimitives() == 1073741823)
-		int k = 0;
 }
 
 
@@ -581,7 +561,6 @@ retrySplit:
 	BBox bounds0 = nodeBounds, bounds1 = nodeBounds;
 	bounds0.pMax[bestAxis] = bounds1.pMin[bestAxis] = tsplit;
 
-	//if (parallelEntry) {
 	if ((n0 < workloadMaxSize) && (n0 > maxPrims) && parallelEntry) {
 		vector<Reference<Primitive> > *prims = new vector<Reference<Primitive> >;
 		vector<int> *originId = new vector<int>;
@@ -591,7 +570,6 @@ retrySplit:
 		}
 		
 		tasks.push_back(new KdTreeBuildSubTreeTask(*prims, *originId, depth - 1, nodeNum + 1, badRefines, bounds0));
-		//tasks.push_back(new KdTreeBuildSubTreeTask(*prims, *originId, 0, nodeNum + 1));
 		// Get next free node from _nodes_ array
 		if (nextFreeNode == nAllocedNodes)
 		{
@@ -617,7 +595,6 @@ retrySplit:
 	nodes[nodeNum].initInterior(bestAxis, aboveChild, tsplit);
 	nodes[nodeNum].debug_nPrimitives = nPrimitives;
 
-	//if (parallelEntry) {
 	if ((n1 < workloadMaxSize) && (n1 > maxPrims) && parallelEntry) {
 		vector<Reference<Primitive> > *prims = new vector<Reference<Primitive> >;
 		vector<int> *originId = new vector<int>;
@@ -627,7 +604,6 @@ retrySplit:
 		}
 		
 		tasks.push_back(new KdTreeBuildSubTreeTask(*prims, *originId, depth - 1, aboveChild, badRefines, bounds1));
-		//tasks.push_back(new KdTreeBuildSubTreeTask(*prims, *originId, 0, aboveChild));
 		// Get next free node from _nodes_ array
 		if (nextFreeNode == nAllocedNodes)
 		{
@@ -670,9 +646,7 @@ bool KdTreeAccel::Intersect(const Ray &ray,
     bool hit = false;
     const KdAccelNode *node = &nodes[0];
 
-	int whileCount = 0;
     while (node != NULL) {
-		whileCount++;
         // Bail out if we found a hit closer than the current node
         if (ray.maxt < tmin) break;
         if (!node->IsLeaf()) {
@@ -856,25 +830,21 @@ KdTreeAccel *CreateKdTreeAccelerator(const vector<Reference<Primitive> > &prims,
     float emptyBonus = ps.FindOneFloat("emptybonus", 0.5f);
     int maxPrims = ps.FindOneInt("maxprims", 1);
     int maxDepth = ps.FindOneInt("maxdepth", -1);
-	if (PARALLEL_CONSTRUCT)
-		testptr = new KdTreeAccel(prims, true, isectCost, travCost,
+	KdTreeAccel *retPtr;
+
+	printf("Start KD-tree construction\n");
+	time_t startTime, endTime;
+	startTime = clock();
+	if (PARALLEL_CONSTRUCT) 
+		retPtr = new KdTreeAccel(prims, true, isectCost, travCost,
 			emptyBonus, maxPrims, maxDepth, PRRALLEL_WORKSIZE);
 	else
-		testptr = new KdTreeAccel(prims, false, isectCost, travCost,
+		retPtr = new KdTreeAccel(prims, false, isectCost, travCost,
 			emptyBonus, maxPrims, maxDepth);
-	int nodeNum = testptr->GetNodeNum();
-	KdAccelNode *nodes = testptr->GetNodes();
-	for (int i = 0; i < nodeNum; i++) { 
-		if (nodes[i].IsLeaf()) {
-			printf("LEAF: nPrim=%d\n", nodes[i].nPrimitives());
-		}
-		else {
-			printf("INTR: nPrim=%d, aboveChild=%d, splitAxis=%d, splitPos=%f\n", 
-				nodes[i].debug_nPrimitives, nodes[i].AboveChild(), nodes[i].SplitAxis(), nodes[i].SplitPos());
-		}
-		//printf("%08x\n%08x\n", ((uint32_t *)(nodes + i))[0], ((uint32_t *)(nodes + i))[1]);
-	}
-	return testptr;
+	endTime = clock();
+	printf("KDtree construction time: %lld ms\n", endTime - startTime);
+	printf("End KD-tree construction\n");
+	return retPtr;
 }
 
 

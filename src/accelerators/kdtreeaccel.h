@@ -58,10 +58,7 @@ public:
 	int GetNodeNum() const { return nextFreeNode; }
 private:
     // KdTreeAccel Private Methods
-    /*void buildTree(int nodeNum, const BBox &bounds,
-        const vector<BBox> &primBounds, uint32_t *primNums, int nprims, int depth,
-        BoundEdge *edges[3], uint32_t *prims0, uint32_t *prims1, int badRefines = 0);*/
-	void buildTree(int nodeNum, const BBox &bounds,
+    void buildTree(int nodeNum, const BBox &bounds,
 		const vector<BBox> &primBounds, uint32_t *primNums, int nprims, int depth,
 		BoundEdge *edges[3], uint32_t *prims0, uint32_t *prims1, vector<Task *> &tasks, int badRefines = 0);
 	
