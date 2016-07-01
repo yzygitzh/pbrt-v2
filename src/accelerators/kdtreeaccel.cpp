@@ -353,8 +353,13 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 			nodesIndicator[(dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->originNodeIdx] = 2 + (i << 2);
 
 		countNodesLeftSubSummer(nodesIndicator, nodesLeftSubSummer, tasks, 0);
-		for (uint32_t i = 0; i < nextFreeNode; ++i)
-			nodes[i].aboveChild = ((i + 1 + nodesLeftSubSummer[i]) << 2);
+		for (uint32_t i = 0; i < nextFreeNode; ++i) { 
+			if (!nodes[i].IsLeaf()) { 
+				int newChildIdx = (i + 1) + nodesLeftSubSummer[i];
+				int flags = (nodes[i].aboveChild & 3);
+				nodes[i].aboveChild = (newChildIdx << 2) + flags;
+			}
+		}
 
 		for (uint32_t i = 0; i < tasks.size(); ++i) {
 			// add, do LEFT BROTHER promote later
@@ -369,8 +374,20 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 			
 			// do nodes interval promotion
 			for (uint32_t j = newNodesOffset; j < newNodesOffset + nodesInterval; ++j){
+				if (j == 10814) {
+					int sum = 0;
+					sum += (dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[1]))->subKdTree->GetNodeNum();
+					sum += (dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[2]))->subKdTree->GetNodeNum();
+					sum += 3;
+					int sumleft = 0;
+					sumleft += (dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[0]))->subKdTree->GetNodeNum();
+					sumleft += 1;
+					int k = 0;
+				}
 				newNodes[j].PromoteNode(nodesPromote,
 					(dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->originPrimId, false);
+				if (newNodes[j].AboveChild() == 23552)
+					int k = 0;
 			}
 
 			newNodesOffset += nodesInterval;
@@ -382,6 +399,8 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 			for (uint32_t j = newNodesOffset; j < newNodesOffset + taskInterval; ++j) {
 				newNodes[j].PromoteNode(newNodesOffset, 
 					(dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[i]))->originPrimId, true);
+				if (newNodes[j].AboveChild() == 23552)
+					int k = 0;
 			}
 
 			nodesPromote += taskInterval - 1;
@@ -394,6 +413,8 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 		for (uint32_t j = newNodesOffset; j < newNodesOffset + nodesInterval; ++j) {
 			newNodes[j].PromoteNode(nodesPromote,
 				(dynamic_cast<KdTreeBuildSubTreeTask *>(tasks[0]))->originPrimId, false);
+			if (newNodes[j].AboveChild() == 23552)
+				int k = 0;
 		}
 
 		newNodesOffset += nodesInterval;
@@ -402,8 +423,8 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 		// replace with new nodes
 		FreeAligned(nodes);
 		nodes = newNodes;
-		nextFreeNode = newNodesOffset;
-	}
+		nextFreeNode = newNodesOffset;		
+	}			
 
     // Free working memory for kd-tree construction
     delete[] primNums;
@@ -411,7 +432,8 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
         delete[] edges[i];
     delete[] prims0;
     delete[] prims1;
-    PBRT_KDTREE_FINISHED_CONSTRUCTION(this);
+
+	PBRT_KDTREE_FINISHED_CONSTRUCTION(this);
 }
 
 
@@ -429,6 +451,8 @@ void KdAccelNode::initLeaf(uint32_t *primNums, int np,
         for (int i = 0; i < np; ++i)
             primitives[i] = primNums[i];
     }
+	if (this->nPrimitives() == 1073741823)
+		int k = 0;
 }
 
 
