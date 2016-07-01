@@ -847,7 +847,7 @@ KdTreeAccel *CreateKdTreeAccelerator(const vector<Reference<Primitive> > &prims,
 		retPtr = new KdTreeAccel(prims, false, isectCost, travCost,
 			emptyBonus, maxPrims, maxDepth);
 	endTime = clock();
-	printf("KDtree construction time: %lld ms\n", endTime - startTime);
+	printf("KDtree construction time: %ld ms\n", endTime - startTime);
 	printf("End KD-tree construction\n");
 	return retPtr;
 }
