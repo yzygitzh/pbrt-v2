@@ -231,7 +231,9 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 		delete[] _thread_primitives;
 
 		// now we have primitives size, confirm worksize first
-		PARALLEL_WORKSIZE = max((unsigned)1024, primitives.size() / threadNum / 64);
+		int newWorkSize = primitives.size() / threadNum / 64;
+		if (newWorkSize > PARALLEL_WORKSIZE)
+			PARALLEL_WORKSIZE = newWorkSize;		
 	}
 	// They've been refined
 	else
