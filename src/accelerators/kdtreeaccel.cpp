@@ -71,10 +71,6 @@ struct KdAccelNode {
         uint32_t onePrimitive;  // Leaf
         uint32_t *primitives;   // Leaf
 	};
-	int debug_nPrimitives;
-
-private:
-public:
     union {
         uint32_t flags;         // Both
         uint32_t nPrims;        // Leaf
@@ -598,7 +594,6 @@ retrySplit:
 	uint32_t aboveChild = nextFreeNode;	
 	
 	nodes[nodeNum].initInterior(bestAxis, aboveChild, tsplit);
-	nodes[nodeNum].debug_nPrimitives = nPrimitives;
 
 	if ((n1 < PARALLEL_WORKSIZE) && (n1 > maxPrims) && parallelEntry) {
 		vector<Reference<Primitive> > *prims = new vector<Reference<Primitive> >;
