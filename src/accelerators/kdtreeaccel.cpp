@@ -36,8 +36,8 @@
 #include "paramset.h"
 #include <time.h>
 
-const bool PARALLEL_CONSTRUCT = false;
-const int PRRALLEL_WORKSIZE = 1024;
+const bool PARALLEL_CONSTRUCT = true;
+int PARALLEL_WORKSIZE = 1024;
 bool tmp_switch = false;
 
 // KdTreeAccel Local Declarations
@@ -203,9 +203,9 @@ countNodesLeftSubSummerRet countNodesLeftSubSummer(vector<int> &nodesIndicator, 
 // KdTreeAccel Method Definitions
 KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry, 
                          int icost, int tcost, float ebonus, int maxp,
-                         int md, int ws, BBox initBounds, int initBadRefines)
+                         int md, BBox initBounds, int initBadRefines)
     : isectCost(icost), parallelEntry(pEntry), traversalCost(tcost), maxPrims(maxp), maxDepth(md),
-      emptyBonus(ebonus), workloadMaxSize(ws) {
+      emptyBonus(ebonus){
 	PBRT_KDTREE_STARTED_CONSTRUCTION(this, p.size());
 		
 	// Thread context initialization
@@ -229,6 +229,9 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 			_thread_primitives[i].~vector();
 		}
 		delete[] _thread_primitives;
+
+		// now we have primitives size, confirm worksize first
+		PARALLEL_WORKSIZE = max((unsigned)1024, primitives.size() / threadNum / 64);
 	}
 	// They've been refined
 	else
@@ -561,7 +564,7 @@ retrySplit:
 	BBox bounds0 = nodeBounds, bounds1 = nodeBounds;
 	bounds0.pMax[bestAxis] = bounds1.pMin[bestAxis] = tsplit;
 
-	if ((n0 < workloadMaxSize) && (n0 > maxPrims) && parallelEntry) {
+	if ((n0 < PARALLEL_WORKSIZE) && (n0 > maxPrims) && parallelEntry) {
 		vector<Reference<Primitive> > *prims = new vector<Reference<Primitive> >;
 		vector<int> *originId = new vector<int>;
 		for (int i = 0; i < n0; i++) { 
@@ -595,7 +598,7 @@ retrySplit:
 	nodes[nodeNum].initInterior(bestAxis, aboveChild, tsplit);
 	nodes[nodeNum].debug_nPrimitives = nPrimitives;
 
-	if ((n1 < workloadMaxSize) && (n1 > maxPrims) && parallelEntry) {
+	if ((n1 < PARALLEL_WORKSIZE) && (n1 > maxPrims) && parallelEntry) {
 		vector<Reference<Primitive> > *prims = new vector<Reference<Primitive> >;
 		vector<int> *originId = new vector<int>;
 		for (int i = 0; i < n1; i++) { 
@@ -833,11 +836,13 @@ KdTreeAccel *CreateKdTreeAccelerator(const vector<Reference<Primitive> > &prims,
 	KdTreeAccel *retPtr;
 
 	printf("Start KD-tree construction\n");
+	printf("Parallel = %d\n", (int)PARALLEL_CONSTRUCT);
+	printf("Worksize bound: %d\n", PARALLEL_WORKSIZE);
 	time_t startTime, endTime;
 	startTime = clock();
 	if (PARALLEL_CONSTRUCT) 
 		retPtr = new KdTreeAccel(prims, true, isectCost, travCost,
-			emptyBonus, maxPrims, maxDepth, PRRALLEL_WORKSIZE);
+			emptyBonus, maxPrims, maxDepth);
 	else
 		retPtr = new KdTreeAccel(prims, false, isectCost, travCost,
 			emptyBonus, maxPrims, maxDepth);
@@ -854,7 +859,7 @@ KdTreeAccel *CreateSubKdTreeAccelerator(const vector<Reference<Primitive> > &pri
 	float emptyBonus = 0.5f;
 	int maxPrims = 1;
 	return new KdTreeAccel(prims, false, isectCost, travCost,
-		emptyBonus, maxPrims, maxDepth, PRRALLEL_WORKSIZE, initBounds, initBadRefines);
+		emptyBonus, maxPrims, maxDepth, initBounds, initBadRefines);
 }
 
 
