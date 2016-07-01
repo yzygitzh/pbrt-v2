@@ -226,7 +226,7 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 		{
 			delete tasks[i];
 			primitives.insert(primitives.end(), _thread_primitives[i].begin(), _thread_primitives[i].end());
-			_thread_primitives[i].~vector();
+			//_thread_primitives[i].~vector();
 		}
 		delete[] _thread_primitives;
 
@@ -269,7 +269,7 @@ KdTreeAccel::KdTreeAccel(const vector<Reference<Primitive> > &p, bool pEntry,
 			delete tasks[i];
 			primBounds.insert(primBounds.end(), _thread_primBounds[i].begin(), _thread_primBounds[i].end());
 			bounds = Union(bounds, _thread_bounds[i]);
-			_thread_primBounds[i].~vector();
+			//_thread_primBounds[i].~vector();
 		}
 		delete[] _thread_primBounds;
 		delete[] _thread_bounds;
