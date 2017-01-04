@@ -1,3 +1,6 @@
+Parallel KD-tree Construction implemented on pbrt_v2 framework.
+Read Parallel KD-tree Construction for Ray Tracing.pdf for the implementation details. 
+The following text is the origin README file. 
 
 Welcome to the 'final' version of pbrt, version 2.  This version of the
 source code corresponds to the system that is described in the second
